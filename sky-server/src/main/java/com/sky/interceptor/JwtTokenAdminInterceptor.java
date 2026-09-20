@@ -1,6 +1,10 @@
 package com.sky.interceptor;
 
+import com.alibaba.fastjson.JSON;
 import com.sky.constant.JwtClaimsConstant;
+import com.sky.context.BaseContext;
+import com.sky.entity.Employee;
+import com.sky.mapper.EmployeeMapper;
 import com.sky.properties.JwtProperties;
 import com.sky.utils.JwtUtil;
 import io.jsonwebtoken.Claims;
@@ -11,6 +15,8 @@ import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * jwt令牌校验的拦截器
@@ -21,6 +27,8 @@ public class JwtTokenAdminInterceptor implements HandlerInterceptor {
 
     @Autowired
     private JwtProperties jwtProperties;
+    @Autowired
+    private EmployeeMapper employeeMapper;
 
     /**
      * 校验jwt
@@ -46,7 +54,26 @@ public class JwtTokenAdminInterceptor implements HandlerInterceptor {
             log.info("jwt校验:{}", token);
             Claims claims = JwtUtil.parseJWT(jwtProperties.getAdminSecretKey(), token);
             Long empId = Long.valueOf(claims.get(JwtClaimsConstant.EMP_ID).toString());
-            log.info("当前员工id：", empId);
+            Integer jwtTokenVersion = Integer.valueOf(claims.get("tokenVersion").toString());
+            BaseContext.setCurrentId(empId);
+            Employee employee = employeeMapper.getById(empId);
+            if (employee == null) {
+                log.info("员工不存在");
+                response.setStatus(401);
+                return false;
+            }
+            // 版本不一致，代表密码改过，旧JWT失效
+            if(!employee.getTokenVersion().equals(jwtTokenVersion)){
+                log.info("token版本不一致，代表密码改过，旧JWT失效");
+                response.setStatus(401);
+                return false;
+            }
+            if (employee.getStatus() == 0) {
+                log.info("当前员工已禁用");
+                response.setStatus(401);
+                return false;
+            }
+            log.info("当前员工id：{}", empId);
             //3、通过，放行
             return true;
         } catch (Exception ex) {
@@ -54,5 +81,11 @@ public class JwtTokenAdminInterceptor implements HandlerInterceptor {
             response.setStatus(401);
             return false;
         }
+    }
+
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) throws Exception {
+        BaseContext.removeCurrentId();
+        log.info("afterCompletion");
     }
 }
